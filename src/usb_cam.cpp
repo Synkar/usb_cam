@@ -412,16 +412,9 @@ int UsbCam::init_decoder(int image_width, int image_height,
 
   avcodec_context_ = avcodec_alloc_context3(avcodec_);
 
-  // Suppress warnings of the following form:
-  //
-  // [swscaler @ 0x############] deprecated pixel format used, make sure you did set range correctly
-  //
-  // Or set this to AV_LOG_FATAL to additionally suppress occasional frame errors, e.g.:
-  //
-  // [mjpeg @ 0x############] overread 4
-  // [mjpeg @ 0x############] No JPEG data found in image
-  // [ERROR] [##########.##########]: Error while decoding frame.
-  //av_log_set_level(AV_LOG_ERROR);
+  // sws_getContext logs "No accelerated colorspace conversion found from
+  // yuv422p to rgb24" at INFO, once per context. Keep warnings and errors.
+  av_log_set_level(AV_LOG_WARNING);
 	
 #if LIBAVCODEC_VERSION_MAJOR < 55
   avframe_camera_ = avcodec_alloc_frame();
@@ -556,9 +549,9 @@ void UsbCam::mjpeg2rgb(char *MJPEG, int len, char *RGB, int NumPixels)
   //unsigned char* frame_buffer = (uint8_t*)av_malloc(avframe_rgb_size_);
   //av_image_fill_arrays(avframe_rgb_->data, avframe_rgb_->linesize, frame_buffer, AV_PIX_FMT_RGB24, avframe_rgb_->width, avframe_rgb_->height, 32);         
 
-  video_sws_ = sws_getContext(xsize, ysize, avcodec_context_->pix_fmt, xsize, ysize, AV_PIX_FMT_RGB24, SWS_FAST_BILINEAR, NULL, NULL,  NULL);
+  if (!video_sws_)
+    video_sws_ = sws_getContext(xsize, ysize, avcodec_context_->pix_fmt, xsize, ysize, AV_PIX_FMT_RGB24, SWS_FAST_BILINEAR, NULL, NULL,  NULL);
   sws_scale(video_sws_, avframe_camera_->data, avframe_camera_->linesize, 0, ysize, avframe_rgb_->data, avframe_rgb_->linesize);
-  sws_freeContext(video_sws_);
   
   //int size = avpicture_layout((AVPicture *)avframe_rgb_, AV_PIX_FMT_RGB24, xsize, ysize, (uint8_t *)RGB, avframe_rgb_size_);
   int size = av_image_copy_to_buffer((uint8_t *)RGB, avframe_rgb_size_, avframe_rgb_->data, avframe_rgb_->linesize, AV_PIX_FMT_RGB24, xsize, ysize, 32);
@@ -1227,6 +1220,9 @@ void UsbCam::shutdown(void)
   if (avframe_rgb_)
     av_free(avframe_rgb_);
   avframe_rgb_ = NULL;
+  if (video_sws_)
+    sws_freeContext(video_sws_);
+  video_sws_ = NULL;
   if(image_)
     free(image_);
   image_ = NULL;
